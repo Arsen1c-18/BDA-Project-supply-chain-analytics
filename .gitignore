@@ -1,0 +1,30 @@
+# Compiled executables are produced by scripts/build_cpp.sh
+cpp/bin/*
+!cpp/bin/.gitkeep
+
+# Manual build outputs kept out of the source directories
+cpp/mapper/mapper[0-9]
+cpp/reducer/reducer[0-9]
+
+# Raw dataset is kept locally; see data/README.md
+data/DataCoSupplyChainDataset.csv
+data/tokenized_access_logs.csv
+
+# Local run artifacts
+logs/
+results/
+tests/actual/
+outputs/
+
+# Notebook / dashboard caches
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+dashboard/__pycache__/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# C++ objects
+*.o
