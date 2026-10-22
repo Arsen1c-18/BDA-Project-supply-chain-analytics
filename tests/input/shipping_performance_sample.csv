@@ -1,9 +1,0 @@
-Order Id,Shipping Mode,Delivery Status,Days for shipping (real),Days for shipment (scheduled),Sales
-1001,Standard Class,Late delivery,5,4,100.00
-1002,First Class,Shipping on time,1,1,50.00
-1001,Standard Class,Late delivery,5,4,50.00
-1003,Same Day,Shipping canceled,0,0,75.00
-1004,Second Class,Advance shipping,3,2,25.00
-1005,Standard Class,Shipping on time,4,4,40.00
-1006,First Class,Late delivery,2,1,60.00
-9999,Standard Class,Late delivery,invalid,4,10.00

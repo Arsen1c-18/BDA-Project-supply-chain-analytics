@@ -6,9 +6,8 @@ cpp/bin/*
 cpp/mapper/mapper[0-9]
 cpp/reducer/reducer[0-9]
 
-# Raw dataset is kept locally; see data/README.md
-data/DataCoSupplyChainDataset.csv
-data/tokenized_access_logs.csv
+# Dataset files are kept locally; see docs/DATASET.md
+data/*
 
 # Local run artifacts
 logs/

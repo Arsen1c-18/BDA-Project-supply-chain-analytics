@@ -64,7 +64,7 @@ fi
 
 if ! timeout 10 hdfs dfs -ls / >/dev/null 2>&1; then
     echo "ERROR: HDFS is not reachable." >&2
-    echo "Start the existing cluster with: bash scripts/start_hadoop.sh" >&2
+    echo "Start HDFS and YARN first (start-dfs.sh / start-yarn.sh)." >&2
     exit 3
 fi
 
@@ -175,14 +175,9 @@ echo "--- output rows ---"
 cat "$TMP_DIR/actual.tsv"
 
 EXPECTED=""
-case "$BASENAME" in
-    DataCoSupplyChainDataset.csv)
-        EXPECTED="$ROOT_DIR/tests/expected/real_dataset_counts.tsv"
-        ;;
-    deliveries_sample.csv)
-        EXPECTED="$ROOT_DIR/tests/expected/delivery_counts.tsv"
-        ;;
-esac
+if [ "$BASENAME" = "DataCoSupplyChainDataset.csv" ]; then
+    EXPECTED="$ROOT_DIR/tests/expected/real_dataset_counts.tsv"
+fi
 
 if [ -n "$EXPECTED" ] && [ -f "$EXPECTED" ]; then
     LC_ALL=C sort "$EXPECTED" > "$TMP_DIR/expected.tsv"

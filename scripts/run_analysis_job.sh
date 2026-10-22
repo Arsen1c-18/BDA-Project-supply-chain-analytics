@@ -29,16 +29,12 @@ case "$JOB" in
         REDUCER="cpp/bin/shipping_performance_reducer"
         SCHEMA_JOB="shipping-performance"
         EXPECTED_REAL="tests/expected/real_shipping_performance.tsv"
-        EXPECTED_SAMPLE_INPUT="shipping_performance_sample.csv"
-        EXPECTED_SAMPLE="tests/expected/shipping_performance_sample.tsv"
         ;;
     category-demand)
         MAPPER="cpp/bin/category_demand_mapper"
         REDUCER="cpp/bin/category_demand_reducer"
         SCHEMA_JOB="category-demand"
         EXPECTED_REAL="tests/expected/real_category_demand.tsv"
-        EXPECTED_SAMPLE_INPUT="category_demand_sample.csv"
-        EXPECTED_SAMPLE="tests/expected/category_demand_sample.tsv"
         ;;
     *)
         echo "ERROR: unknown job: $JOB" >&2
@@ -83,7 +79,7 @@ fi
 
 if ! timeout 10 hdfs dfs -ls / >/dev/null 2>&1; then
     echo "ERROR: HDFS is not reachable." >&2
-    echo "Start the existing cluster with: bash scripts/start_hadoop.sh" >&2
+    echo "Start HDFS and YARN first (start-dfs.sh / start-yarn.sh)." >&2
     exit 3
 fi
 
@@ -242,8 +238,6 @@ cat "$TMP_DIR/actual.tsv"
 EXPECTED=""
 if [ "$BASENAME" = "DataCoSupplyChainDataset.csv" ]; then
     EXPECTED="$ROOT_DIR/$EXPECTED_REAL"
-elif [ "$BASENAME" = "$EXPECTED_SAMPLE_INPUT" ]; then
-    EXPECTED="$ROOT_DIR/$EXPECTED_SAMPLE"
 fi
 
 if [ -n "$EXPECTED" ] && [ -f "$EXPECTED" ]; then

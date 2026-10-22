@@ -16,7 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "../common/csv.hpp"
+#include "../csv.hpp"
 
 namespace {
 
