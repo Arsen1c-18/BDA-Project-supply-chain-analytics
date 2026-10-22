@@ -1,0 +1,9 @@
+Order Id,Shipping Mode,Delivery Status,Notes
+1001,Standard Class,Late delivery,"fragile, handle with care"
+1002,First Class,Shipping on time,"quoted ""priority"" item"
+1001,Standard Class,Late delivery,duplicate item row for the same order
+1003,Same Day,Shipping canceled,"multi-line
+note inside a quoted field"
+1004,Second Class,Advance shipping,ok
+1005,Standard Class,Shipping on time,ok
+1006,Standard Class,Late delivery,ok

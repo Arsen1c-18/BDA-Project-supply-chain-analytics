@@ -1,0 +1,8 @@
+Category Name,Order Id,Order Item Quantity,Sales,Delivery Status
+Cleats,1001,2,100.00,Late delivery
+Cleats,1001,1,50.00,Late delivery
+"Men's Footwear",1002,1,200.00,Shipping on time
+Indoor/Outdoor Games,1003,3,75.00,Shipping canceled
+Cleats,1004,1,25.00,Shipping on time
+"Camping, Hiking",1005,2,30.00,Shipping on time
+"Broken, Category",9999,invalid,10.00,Late delivery
