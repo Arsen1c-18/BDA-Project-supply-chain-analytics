@@ -92,7 +92,7 @@ Files:
 
 - `cpp/mapper/shipping_performance_mapper.cpp`
 - `cpp/reducer/shipping_performance_reducer.cpp`
-- shared parser/helpers: `cpp/common/csv.hpp`
+- shared parser/helpers: `cpp/csv.hpp`
 
 Purpose: aggregate shipping performance by shipping mode. The job keeps both
 order-item record counts and distinct-order counts because they answer different
@@ -127,7 +127,7 @@ Files:
 
 - `cpp/mapper/category_demand_mapper.cpp`
 - `cpp/reducer/category_demand_reducer.cpp`
-- shared parser/helpers: `cpp/common/csv.hpp`
+- shared parser/helpers: `cpp/csv.hpp`
 
 Purpose: measure demand and revenue proxies by category while retaining
 distinct-order and late-item counts.
@@ -162,8 +162,8 @@ diagnostics only to stderr.
 `data/DataCoSupplyChainDataset.csv`
 
 The raw CSV is **not committed** because it is about 96 MB. See
-`data/README.md` for the download source, expected filename and SHA-256 checksum.
-The small column dictionary `data/DescriptionDataCoSupplyChain.csv` is committed.
+`docs/DATASET.md` for the download source, expected filename and SHA-256 checksum.
+No files under `data/` are tracked in Git.
 
 - 95,910,149 bytes (~95.9 MB), 180,520 physical lines, 53 columns.
 - 180,519 data rows; **65,752 unique `Order Id`** values.
@@ -193,7 +193,7 @@ their distinct-order counts with equivalent pandas/PySpark aggregations.
 ## Project layout
 
 ```text
-cpp/common/csv.hpp                         # shared RFC-4180 parser and helpers
+cpp/csv.hpp                                # shared RFC-4180 parser and helpers
 cpp/mapper/delivery_status_mapper.cpp      # Job 1
 cpp/reducer/delivery_status_reducer.cpp    # Job 1
 cpp/mapper/shipping_performance_mapper.cpp # Job 2
@@ -203,33 +203,22 @@ cpp/reducer/category_demand_reducer.cpp
 cpp/bin/                                   # compiled binaries
 
 scripts/build_cpp.sh                       # build all six binaries
-scripts/run_local_test.sh                  # Job 1 sample/full local test
-scripts/run_local_analysis_test.sh         # Job 2/3 sample/full local test
 scripts/check_schema.py                    # Job 1 header check
 scripts/check_job_schema.py                # Job 2/3 header checks
-scripts/start_hadoop.sh                    # idempotent HDFS/YARN startup
 scripts/run_streaming_job.sh               # Job 1 HDFS + YARN submission
 scripts/run_analysis_job.sh                # Job 2/3 HDFS + YARN submission
 scripts/run_all_hadoop_jobs.sh             # all three jobs, one run-id
-scripts/verify_env.sh                      # read-only environment report
 
-tests/input/deliveries_sample.csv
-tests/input/shipping_performance_sample.csv
-tests/input/category_demand_sample.csv
-tests/expected/delivery_counts.tsv
 tests/expected/real_dataset_counts.tsv
-tests/expected/shipping_performance_sample.tsv
 tests/expected/real_shipping_performance.tsv
-tests/expected/category_demand_sample.tsv
 tests/expected/real_category_demand.tsv
 
 notebooks/supply_chain_analysis.ipynb      # PySpark + Hadoop-result comparison
 dashboard/app.py                           # Streamlit dashboard
-data/README.md                             # dataset download / checksum
-data/DescriptionDataCoSupplyChain.csv      # field dictionary
-requirements.txt
+docs/DATASET.md                            # dataset download / checksum
 docs/SETUP_REPORT.md
 docs/WORKFLOW_LOG.md
+requirements.txt
 ```
 
 ## Requirements
@@ -255,7 +244,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Build and local tests
+## Build
 
 Build all C++ jobs:
 
@@ -263,34 +252,16 @@ Build all C++ jobs:
 bash scripts/build_cpp.sh
 ```
 
-Run Job 1 locally:
-
-```bash
-bash scripts/run_local_test.sh
-bash scripts/run_local_test.sh --real
-```
-
-Run Jobs 2 and 3 locally:
-
-```bash
-bash scripts/run_local_analysis_test.sh shipping-performance
-bash scripts/run_local_analysis_test.sh shipping-performance --real
-bash scripts/run_local_analysis_test.sh category-demand
-bash scripts/run_local_analysis_test.sh category-demand --real
-```
-
-The local tests use `mapper | LC_ALL=C sort -t $'\t' -k1,1 | reducer` to imitate
-Hadoop's bytewise shuffle and diff the result against the expected fixture. The
-new-job samples also include one malformed row; the test asserts that it is
-skipped and reported on stderr, and separately checks the headerless
-`-cmdenv`-style path used by non-first HDFS splits.
+The submit scripts compare full-dataset output with the three fixtures under
+`tests/expected/` when the input basename is `DataCoSupplyChainDataset.csv`.
 
 ## Hadoop startup and submission
 
-Start the existing HDFS/YARN services:
+Start HDFS and YARN with your Hadoop installation before submitting jobs:
 
 ```bash
-bash scripts/start_hadoop.sh
+$HADOOP_HOME/sbin/start-dfs.sh
+$HADOOP_HOME/sbin/start-yarn.sh
 ```
 
 Run all three jobs with one run-id:
@@ -307,16 +278,6 @@ Run one job at a time:
 bash scripts/run_streaming_job.sh data/DataCoSupplyChainDataset.csv my-run
 bash scripts/run_analysis_job.sh shipping-performance data/DataCoSupplyChainDataset.csv my-run
 bash scripts/run_analysis_job.sh category-demand data/DataCoSupplyChainDataset.csv my-run
-```
-
-Small-fixture submission examples:
-
-```bash
-bash scripts/run_streaming_job.sh tests/input/deliveries_sample.csv sample-job1
-bash scripts/run_analysis_job.sh shipping-performance \
-  tests/input/shipping_performance_sample.csv sample-shipping
-bash scripts/run_analysis_job.sh category-demand \
-  tests/input/category_demand_sample.csv sample-category
 ```
 
 ### HDFS paths
@@ -463,7 +424,7 @@ it is the newest bundle under `results/hadoop/`.
 
 ## Troubleshooting
 
-- **HDFS is not reachable** — run `bash scripts/start_hadoop.sh`, then retry.
+- **HDFS is not reachable** — start HDFS/YARN (`start-dfs.sh` and `start-yarn.sh`), then retry.
 - **Output/result already exists** — this is intentional. Choose a new run-id; the
   scripts never delete or overwrite existing data.
 - **No CSV header in this input split** — submit through the scripts so header-

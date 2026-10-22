@@ -1,8 +1,8 @@
 # Data
 
 The full raw dataset is intentionally **not tracked in Git** because it is about
-96 MB. Keep it in this directory locally before running the C++, PySpark or
-Hadoop jobs.
+96 MB. Keep it in `data/` locally before running the C++, PySpark or Hadoop jobs.
+No files under `data/` are committed; see the repository policy below.
 
 ## Required input
 
@@ -34,9 +34,11 @@ sha256sum data/DataCoSupplyChainDataset.csv
 
 The expected value must match the SHA-256 in the table above.
 
-## Included files
+## Repository policy
 
-- `DescriptionDataCoSupplyChain.csv` contains the field dictionary for the raw
-  dataset and is small enough to track in Git.
+- `data/` is intentionally ignored by `.gitignore`; the raw CSV is never pushed.
+- The optional local field dictionary `data/DescriptionDataCoSupplyChain.csv`
+  may be kept on disk, but it is not required to run the project and is not
+  tracked.
 - `tokenized_access_logs.csv` was removed because it is unrelated to this
   project and is not used by any job, notebook or dashboard component.

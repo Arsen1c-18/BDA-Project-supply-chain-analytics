@@ -71,9 +71,9 @@ Jobs 2 and 3 produce:
 | Job 2 | `cpp/mapper/shipping_performance_mapper.cpp` | `cpp/reducer/shipping_performance_reducer.cpp` | Record/order counts, status counts, days, sales proxy |
 | Job 3 | `cpp/mapper/category_demand_mapper.cpp` | `cpp/reducer/category_demand_reducer.cpp` | Category item/order counts, quantity, sales, late rate |
 
-`cpp/common/csv.hpp` contains the shared RFC-4180 parser, header normalization,
-status mapping and safe numeric parsing. The original Job 1 mapper and reducer were
-left unchanged.
+`cpp/csv.hpp` contains the shared RFC-4180 parser, header normalization, status
+mapping and safe numeric parsing. The original Job 1 mapper and reducer were left
+unchanged.
 
 ## 4. Build command
 
@@ -88,27 +88,24 @@ g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic \
     -static-libstdc++ -static-libgcc <source>.cpp -o <binary>
 ```
 
-## 5. Local tests
+## 5. Verification fixtures
 
-```bash
-bash scripts/run_local_test.sh
-bash scripts/run_local_test.sh --real
+The submit scripts compare full-data output against:
 
-bash scripts/run_local_analysis_test.sh shipping-performance
-bash scripts/run_local_analysis_test.sh shipping-performance --real
-bash scripts/run_local_analysis_test.sh category-demand
-bash scripts/run_local_analysis_test.sh category-demand --real
+```text
+tests/expected/real_dataset_counts.tsv
+tests/expected/real_shipping_performance.tsv
+tests/expected/real_category_demand.tsv
 ```
 
-The local pipeline uses `mapper | LC_ALL=C sort -t $'\t' -k1,1 | reducer` to
-imitate Hadoop's bytewise shuffle, then diffs against the expected fixture. The
-sample tests also include one deliberately malformed row (asserting it is skipped
-and reported on stderr) and a headerless `-cmdenv`-style path used by non-first
-HDFS splits.
+Earlier local sample checks used `mapper | LC_ALL=C sort -t $'\t' -k1,1 | reducer`
+to imitate Hadoop's bytewise shuffle. Those optional local test scripts and sample
+fixtures were removed during repository cleanup; the historical results remain
+recorded below.
 
 ## 6. Test results
 
-### 6.1 Local tests
+### 6.1 Local verification (historical)
 
 | Test | Result |
 |---|---|
