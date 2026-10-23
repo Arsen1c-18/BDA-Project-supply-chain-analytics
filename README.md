@@ -19,12 +19,13 @@ shipping-cost, stockout or inventory-risk claims.
   - Job 2: `job_1792688515026_0004` — 2 maps, 1 reduce, 4 rows.
   - Job 3: `job_1792688515026_0005` — 2 maps, 1 reduce, 50 rows.
 - Each distributed output matched its expected TSV with a sorted `diff`.
-- The notebook executed end to end with **15/15 code cells and 0 errors** against
+- The notebook executed end to end with **64/64 code cells and 0 errors** against
   the distributed bundle `results/hadoop/retry-20261022T175034Z/`; all
   Hadoop-vs-Spark comparison differences were **0**.
-- The Streamlit `AppTest` reported **0 exceptions**, 8 KPI metrics and the five
-  expected tabs, including **Hadoop jobs**; the server returned HTTP 200 on both
-  the root and health endpoints.
+- The Streamlit `AppTest` reported **0 exceptions** across the four tabs,
+  filters/reset/refresh, all three Hadoop verification views, and the saved-model
+  prediction form. Earlier server checks returned HTTP 200 on both the root and
+  health endpoints.
 - The first two Job 2/3 attempts failed because their `BDA_*_COL` configuration
   was incomplete. Their output directories were left untouched; new directories
   were used for the successful retry.
@@ -376,8 +377,10 @@ The model excludes delivery outcomes, actual shipping days, shipping date,
 
 Current model result (local PySpark run against the distributed Hadoop bundle):
 **accuracy 0.6915**, **F1 0.6870**, **AUC 0.7130**. Artefacts are written under
-`outputs/model/`; the dashboard reads them and never retrains the model on
-interaction.
+`outputs/model/`; the dashboard reads them, can load the saved `PipelineModel`
+for a single-order prediction, and never retrains the model on interaction.
+Interactive prediction requires Java 17+; set `BDA_SPARK_JAVA_HOME` if the
+default `java` is older.
 
 ## Streamlit dashboard
 
@@ -391,20 +394,23 @@ The dashboard:
 
 - Filters order-item rows by shipping mode, delivery status and category.
 - Shows distinct-order KPIs, late rates, shipping-mode performance and category
-  demand proxies.
-- Has a **Hadoop jobs** tab for the three downloaded C++ result tables, charts and
-  pandas comparison columns.
-- Reads `results/hadoop/<latest-run-id>/` by default, or a path set through
-  `BDA_HADOOP_RESULTS`. Set `BDA_HADOOP_RUN_ID` to pin a specific bundle.
-- Uses model metrics only when `outputs/model/metrics.json` exists.
+  demand proxies across **Overview** and **Analysis** tabs.
+- Has a **Verification** tab for the three downloaded C++ result tables, charts,
+  row-count checks and local pandas comparisons.
+- Reads the pinned bundle `results/hadoop/retry-20261022T175034Z/` by default.
+  `BDA_HADOOP_RESULTS` overrides the bundle root and `BDA_HADOOP_RUN_ID` selects
+  another run.
+- Uses saved model metrics and sample predictions, and can restore the saved
+  Spark `PipelineModel` for a one-order late-delivery prediction. It never
+  retrains the model.
 - Labels `Order Item Total`/`Sales` as proxies and never presents them as shipping
   charges.
-- Does not read intermediate mapper data and does not retrain the model.
+- Does not read intermediate mapper data.
 
-A `local-verification` bundle is labelled in the dashboard as local-only. It is
-useful for UI testing but is not evidence of a distributed YARN run. The verified
-distributed bundle is `retry-20261022T175034Z`; it is selected automatically when
-it is the newest bundle under `results/hadoop/`.
+A `local-verification` bundle exists for UI testing but is not evidence of a
+distributed YARN run. The dashboard pins the verified distributed bundle
+`retry-20261022T175034Z`; use `BDA_HADOOP_RUN_ID` to inspect a different verified
+run.
 
 ## Limitations
 

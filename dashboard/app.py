@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import shutil
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -64,6 +67,172 @@ def load_data(path_text: str) -> pd.DataFrame:
     d["delivery_group"] = d.delivery_status.map(GROUP).fillna("other")
     d["is_late"] = (d.delivery_group == "late").astype(int)
     return d
+
+
+MODEL_FEATURES = [
+    "scheduled_days",
+    "total_quantity",
+    "total_sales",
+    "avg_discount_rate",
+    "shipping_mode_idx",
+    "market_idx",
+    "order_region_idx",
+    "customer_segment_idx",
+    "payment_type_idx",
+]
+MODEL_CATEGORIES = [
+    "shipping_mode",
+    "market",
+    "order_region",
+    "customer_segment",
+    "payment_type",
+]
+
+
+def configure_spark_java() -> str:
+    """Use the same Java discovery rules as the analysis notebook."""
+    # Spark workers otherwise fall back to PATH's `python3`, which may be a
+    # different Python minor version from the virtualenv running Streamlit.
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+    override = os.environ.get("BDA_SPARK_JAVA_HOME")
+    if override:
+        java_home = Path(override).expanduser()
+        if (java_home / "bin" / "java").exists():
+            os.environ["JAVA_HOME"] = str(java_home)
+            return str(java_home)
+        raise RuntimeError(f"BDA_SPARK_JAVA_HOME does not contain bin/java: {java_home}")
+    java_bin = shutil.which("java")
+    if java_bin:
+        java_home = Path(java_bin).resolve().parents[1]
+        os.environ["JAVA_HOME"] = str(java_home)
+        return str(java_home)
+    raise RuntimeError("Java 17+ was not found. Set BDA_SPARK_JAVA_HOME to use model prediction.")
+
+
+@st.cache_resource(show_spinner="Loading saved Spark prediction model…")
+def load_prediction_model(model_path_text: str, expected_features: tuple[str, ...]):
+    """Load the existing fitted pipeline once; never fit or retrain it here."""
+    configure_spark_java()
+    from pyspark.ml import PipelineModel
+    from pyspark.sql import SparkSession
+
+    spark = (
+        SparkSession.builder.master(os.environ.get("SPARK_MASTER", "local[*]"))
+        .appName("SupplyChainDashboardInference")
+        .config("spark.ui.enabled", "false")
+        .config("spark.sql.shuffle.partitions", "2")
+        .config("spark.pyspark.python", os.environ.get("PYSPARK_PYTHON", sys.executable))
+        .config("spark.pyspark.driver.python", os.environ.get("PYSPARK_DRIVER_PYTHON", sys.executable))
+        .getOrCreate()
+    )
+    spark.sparkContext.setLogLevel("ERROR")
+    pipeline_model = PipelineModel.load(model_path_text)
+
+    indexers = {}
+    assembler = None
+    classifier = None
+    for stage in pipeline_model.stages:
+        if hasattr(stage, "getInputCol") and hasattr(stage, "labels"):
+            indexers[stage.getInputCol()] = [str(label) for label in stage.labels]
+        elif hasattr(stage, "getInputCols"):
+            assembler = stage
+        elif hasattr(stage, "getLabelCol") and hasattr(stage, "getPredictionCol"):
+            classifier = stage
+
+    if set(indexers) != set(MODEL_CATEGORIES):
+        raise ValueError("Saved model does not contain the expected fitted category indexers.")
+    if assembler is None or list(assembler.getInputCols()) != list(expected_features):
+        raise ValueError("Saved model feature vector does not match the feature schema in metrics.json.")
+    if classifier is None or classifier.getLabelCol() != "is_late":
+        raise ValueError("Saved model target schema is not the expected is_late classification target.")
+    if any(not indexers[name] for name in MODEL_CATEGORIES):
+        raise ValueError("A fitted category indexer has no known labels to offer for prediction.")
+    return spark, pipeline_model, indexers
+
+
+def prediction_defaults(data: pd.DataFrame) -> tuple[pd.DataFrame, dict, dict]:
+    """Build valid order-level defaults and numeric ranges from loaded rows."""
+    aggregated = data.groupby("order_id").agg(
+        scheduled_days=("scheduled_days", "first"),
+        total_quantity=("quantity", "sum"),
+        total_sales=("sales", "sum"),
+        avg_discount_rate=("discount_rate", "mean"),
+        shipping_mode=("shipping_mode", "first"),
+        market=("market", "first"),
+        order_region=("order_region", "first"),
+        customer_segment=("customer_segment", "first"),
+    )
+    if "order_type" in data:
+        payment_type = data.groupby("order_id")["order_type"].first().rename("payment_type")
+        aggregated = aggregated.join(payment_type)
+    else:
+        aggregated["payment_type"] = pd.NA
+    numeric = ["scheduled_days", "total_quantity", "total_sales", "avg_discount_rate"]
+    valid = aggregated.dropna(subset=numeric + MODEL_CATEGORIES).copy()
+    for name in numeric:
+        valid[name] = pd.to_numeric(valid[name], errors="coerce")
+    valid = valid.dropna(subset=numeric)
+    valid = valid[valid[numeric].apply(
+        lambda col: col.map(lambda value: math.isfinite(float(value)))
+    ).all(axis=1)]
+    if valid.empty:
+        raise ValueError("No complete order-level feature rows are available to set prediction defaults.")
+
+    defaults = {
+        "scheduled_days": int(round(float(valid.scheduled_days.median()))),
+        "total_quantity": int(round(float(valid.total_quantity.median()))),
+        "total_sales": float(valid.total_sales.median()),
+        "avg_discount_rate": float(valid.avg_discount_rate.median()),
+    }
+    bounds = {
+        "scheduled_days": (max(0, int(valid.scheduled_days.min())), int(valid.scheduled_days.max())),
+        "total_quantity": (0, int(valid.total_quantity.max())),
+        "total_sales": (0.0, float(valid.total_sales.max())),
+        "avg_discount_rate": (0.0, 1.0),
+    }
+    for name, (minimum, maximum) in bounds.items():
+        defaults[name] = min(max(defaults[name], minimum), maximum)
+    return valid, defaults, bounds
+
+
+def predict_late(spark, pipeline_model, values: dict) -> tuple[bool, float | None]:
+    """Run one row through the saved preprocessing and classifier stages."""
+    import math
+    from pyspark.ml.functions import vector_to_array
+    from pyspark.sql import types as T
+
+    schema = T.StructType([
+        T.StructField("scheduled_days", T.IntegerType(), False),
+        T.StructField("total_quantity", T.LongType(), False),
+        T.StructField("total_sales", T.DoubleType(), False),
+        T.StructField("avg_discount_rate", T.DoubleType(), False),
+        T.StructField("shipping_mode", T.StringType(), False),
+        T.StructField("market", T.StringType(), False),
+        T.StructField("order_region", T.StringType(), False),
+        T.StructField("customer_segment", T.StringType(), False),
+        T.StructField("payment_type", T.StringType(), False),
+    ])
+    row = (
+        int(values["scheduled_days"]),
+        int(values["total_quantity"]),
+        float(values["total_sales"]),
+        float(values["avg_discount_rate"]),
+        str(values["shipping_mode"]),
+        str(values["market"]),
+        str(values["order_region"]),
+        str(values["customer_segment"]),
+        str(values["payment_type"]),
+    )
+    for name in ["total_sales", "avg_discount_rate"]:
+        if not math.isfinite(float(values[name])):
+            raise ValueError(f"{name.replace('_', ' ').title()} must be a finite number.")
+    prediction = pipeline_model.transform(spark.createDataFrame([row], schema=schema))
+    result = prediction.select("prediction", vector_to_array("probability").alias("probability_array")).first()
+    predicted_late = int(result["prediction"]) == 1
+    probabilities = result["probability_array"]
+    late_probability = float(probabilities[1]) if probabilities is not None and len(probabilities) > 1 else None
+    return predicted_late, late_probability
 
 def pct(n, den):
     return 100 * n / den if den else 0.0
@@ -209,7 +378,118 @@ with tabs[2]:
             a,b,c=st.columns(3)
             a.metric("Accuracy",f"{metrics['accuracy']:.4f}"); b.metric("F1",f"{metrics['f1']:.4f}"); c.metric("AUC",f"{metrics['auc']:.4f}")
             st.write("Decision tree trained in the notebook on order-level features; these saved evaluation metrics are unchanged.")
-            st.info("Interactive prediction is unavailable: the saved artifact requires fitted Spark StringIndexer mappings and order-level aggregated features. Using raw sidebar fields would not reproduce the trained feature schema safely.")
+            model_path_text = str(metrics.get("model_path", "")).strip()
+            model_path = Path(model_path_text).expanduser() if model_path_text else None
+            if model_path is not None and not model_path.is_absolute():
+                model_path = ROOT / model_path
+            model_ready = False
+            if list(metrics.get("features", [])) != MODEL_FEATURES:
+                st.warning("Interactive prediction is unavailable because the saved feature list does not match the supported model input schema.")
+            elif model_path is None or not model_path.is_dir():
+                st.warning("Interactive prediction is unavailable because the saved Spark model directory could not be found.")
+            else:
+                try:
+                    spark, pipeline_model, fitted_labels = load_prediction_model(
+                        str(model_path.resolve()), tuple(metrics["features"])
+                    )
+                    valid_orders, numeric_defaults, numeric_bounds = prediction_defaults(df)
+                    model_ready = True
+                except Exception as exc:
+                    st.warning("The saved Spark model could not be loaded for prediction.")
+                    st.caption(str(exc))
+
+            if model_ready:
+                st.subheader("Predict an order's delivery risk")
+                st.caption("Enter the order-level features used during training. The fitted Spark pipeline applies its saved category mappings.")
+                with st.form("late_delivery_prediction_form"):
+                    n1, n2 = st.columns(2)
+                    with n1:
+                        scheduled_days = st.number_input(
+                            "Scheduled shipping days",
+                            min_value=int(numeric_bounds["scheduled_days"][0]),
+                            max_value=int(numeric_bounds["scheduled_days"][1]),
+                            value=int(numeric_defaults["scheduled_days"]),
+                            step=1,
+                        )
+                        total_quantity = st.number_input(
+                            "Total item quantity",
+                            min_value=int(numeric_bounds["total_quantity"][0]),
+                            max_value=int(numeric_bounds["total_quantity"][1]),
+                            value=int(numeric_defaults["total_quantity"]),
+                            step=1,
+                        )
+                    with n2:
+                        total_sales = st.number_input(
+                            "Total sales value",
+                            min_value=float(numeric_bounds["total_sales"][0]),
+                            max_value=float(numeric_bounds["total_sales"][1]),
+                            value=float(numeric_defaults["total_sales"]),
+                            step=0.01,
+                            format="%.2f",
+                            help="Sum of Sales across the order items; it is not shipping cost.",
+                        )
+                        avg_discount_rate = st.number_input(
+                            "Average item discount rate",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=min(1.0, max(0.0, float(numeric_defaults["avg_discount_rate"]))),
+                            step=0.001,
+                            format="%.4f",
+                        )
+
+                    category_values = {}
+                    category_defaults = {}
+                    for name in MODEL_CATEGORIES:
+                        observed = valid_orders[name].mode(dropna=True)
+                        proposed = str(observed.iloc[0]) if not observed.empty else fitted_labels[name][0]
+                        category_defaults[name] = proposed if proposed in fitted_labels[name] else fitted_labels[name][0]
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        category_values["shipping_mode"] = st.selectbox(
+                            "Shipping mode", fitted_labels["shipping_mode"],
+                            index=fitted_labels["shipping_mode"].index(category_defaults["shipping_mode"]),
+                        )
+                        category_values["market"] = st.selectbox(
+                            "Market", fitted_labels["market"],
+                            index=fitted_labels["market"].index(category_defaults["market"]),
+                        )
+                    with c2:
+                        category_values["order_region"] = st.selectbox(
+                            "Order region", fitted_labels["order_region"],
+                            index=fitted_labels["order_region"].index(category_defaults["order_region"]),
+                        )
+                        category_values["customer_segment"] = st.selectbox(
+                            "Customer segment", fitted_labels["customer_segment"],
+                            index=fitted_labels["customer_segment"].index(category_defaults["customer_segment"]),
+                        )
+                    with c3:
+                        category_values["payment_type"] = st.selectbox(
+                            "Order type", fitted_labels["payment_type"],
+                            index=fitted_labels["payment_type"].index(category_defaults["payment_type"]),
+                            help="This is the source CSV's Type field, mapped to payment_type in the notebook.",
+                        )
+                    submitted = st.form_submit_button("Predict Late Delivery", type="primary")
+
+                if submitted:
+                    try:
+                        values = {
+                            "scheduled_days": scheduled_days,
+                            "total_quantity": total_quantity,
+                            "total_sales": total_sales,
+                            "avg_discount_rate": avg_discount_rate,
+                            **category_values,
+                        }
+                        predicted_late, late_probability = predict_late(spark, pipeline_model, values)
+                        if predicted_late:
+                            st.warning("Prediction: Late")
+                        else:
+                            st.success("Prediction: Not Late")
+                        if late_probability is not None:
+                            st.metric("Model late probability", f"{late_probability:.1%}")
+                    except Exception as exc:
+                        st.error("Prediction could not be completed with these inputs.")
+                        st.caption(str(exc))
+
             if pred_path.exists():
                 with st.expander("Saved sample predictions"):
                     st.dataframe(pd.read_csv(pred_path),width="stretch",hide_index=True)
